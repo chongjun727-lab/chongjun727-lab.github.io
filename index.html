@@ -719,20 +719,12 @@
       display: flex;
       width: max-content;
       gap: 14px;
-    }
-    .marquee-left { animation: scrollLeft 34s linear infinite; }
-    .marquee-right { animation: scrollRight 38s linear infinite; }
-    .marquee-wrapper:hover .marquee-track,
-    body.rm .marquee-track {
-      animation-play-state: paused;
-    }
-    @keyframes scrollLeft {
-      0% { transform: translateX(0); }
-      100% { transform: translateX(-50%); }
-    }
-    @keyframes scrollRight {
-      0% { transform: translateX(-50%); }
-      100% { transform: translateX(0); }
+      /* Motion is driven by JS requestAnimationFrame (see initBrandMarquee).
+         Pure CSS keyframe animations that start off-screen are often never
+         started/painted by iOS Safari & WKWebView until the user taps, so
+         the tracks are transformed directly by script instead. */
+      will-change: transform;
+      transform: translate3d(0, 0, 0);
     }
     .brand-chip {
       display: inline-flex;
@@ -3770,6 +3762,50 @@
         const r2 = document.getElementById('marquee-row-2');
         if (r1) r1.innerHTML = buildTrack(row1);
         if (r2) r2.innerHTML = buildTrack(row2);
+        if (!r1 || !r2) return;
+
+        /* rAF-driven scrolling: starts on its own as soon as the page loads,
+           no tap/scroll wake-up needed. Speeds match the former CSS pace
+           (1.5 chip-sets per 34s / 38s); wrapping at exactly one set width
+           keeps the loop seamless. Pauses on real mouse hover (fine pointer
+           only, so a touch tap can never stick it paused) and whenever the
+           nav 动效 toggle puts body.rm on. */
+        const GAP = 14;
+        let setW1 = 0, setW2 = 0;
+        function measure() {
+          setW1 = (r1.scrollWidth + GAP) / 3;
+          setW2 = (r2.scrollWidth + GAP) / 3;
+        }
+        measure();
+        window.addEventListener('resize', measure);
+        if (document.fonts && document.fonts.ready) document.fonts.ready.then(measure);
+
+        const SPEED1 = 1.5 / 34; /* sets per second, row 1 moves left */
+        const SPEED2 = 1.5 / 38; /* sets per second, row 2 moves right */
+        let off1 = 0, off2 = 0, last = null, hoverPaused = false;
+
+        const wrapper = r1.parentElement;
+        if (wrapper && window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+          wrapper.addEventListener('mouseenter', () => { hoverPaused = true; });
+          wrapper.addEventListener('mouseleave', () => { hoverPaused = false; });
+        }
+
+        r2.style.transform = 'translate3d(' + (-setW2) + 'px, 0, 0)';
+
+        function frame(ts) {
+          if (last === null) last = ts;
+          const dt = Math.min(0.05, (ts - last) / 1000);
+          last = ts;
+          const paused = hoverPaused || document.body.classList.contains('rm');
+          if (!paused && setW1 > 0 && setW2 > 0) {
+            off1 = (off1 + SPEED1 * setW1 * dt) % setW1;
+            off2 = (off2 + SPEED2 * setW2 * dt) % setW2;
+            r1.style.transform = 'translate3d(' + (-off1) + 'px, 0, 0)';
+            r2.style.transform = 'translate3d(' + (off2 - setW2) + 'px, 0, 0)';
+          }
+          requestAnimationFrame(frame);
+        }
+        requestAnimationFrame(frame);
       } catch (err) {}
     })();
 
